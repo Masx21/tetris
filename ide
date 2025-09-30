@@ -1,0 +1,155 @@
+#include <Adafruit_NeoPixel.h>
+
+#define NUM_MATRICES 2
+#define MATRIX_WIDTH 8
+#define MATRIX_HEIGHT 8
+#define NUM_PIXELS (NUM_MATRICES * MATRIX_WIDTH * MATRIX_HEIGHT)
+
+// Piny
+#define PIN_LEFT 19
+#define PIN_RIGHT 23
+#define PIN_ROTATE 5
+#define PIN_DATA 18
+
+Adafruit_NeoPixel strip(NUM_PIXELS, PIN_DATA, NEO_GRB + NEO_KHZ800);
+
+// Tvarove definicie: 7 tvarov, kazdy s 4 rotaciami, 4x4
+const byte shapes[7][4][4][4] = {
+  // T
+  {
+    {{0,1,0,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,1,0},{0,1,0,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{0,1,0,0},{0,0,0,0}},
+    {{0,1,0,0},{1,1,0,0},{0,1,0,0},{0,0,0,0}}
+  },
+  // O
+  {
+    {{1,1,0,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}}
+  },
+  // S
+  {
+    {{0,1,1,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{1,0,0,0},{1,1,0,0},{0,1,0,0},{0,0,0,0}},
+    {{0,1,1,0},{1,1,0,0},{0,0,0,0},{0,0,0,0}},
+    {{1,0,0,0},{1,1,0,0},{0,1,0,0},{0,0,0,0}}
+  },
+  // Z
+  {
+    {{1,1,0,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{1,1,0,0},{1,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{0,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{1,1,0,0},{1,0,0,0},{0,0,0,0}}
+  },
+  // J
+  {
+    {{1,0,0,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,1,0},{0,1,0,0},{0,1,0,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{0,0,1,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,0,0},{1,1,0,0},{0,0,0,0}}
+  },
+  // L
+  {
+    {{0,0,1,0},{1,1,1,0},{0,0,0,0},{0,0,0,0}},
+    {{0,1,0,0},{0,1,0,0},{0,1,1,0},{0,0,0,0}},
+    {{0,0,0,0},{1,1,1,0},{1,0,0,0},{0,0,0,0}},
+    {{1,1,0,0},{0,1,0,0},{0,1,0,0},{0,0,0,0}}
+  },
+  // I
+  {
+    {{0,0,0,0},{1,1,1,1},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,0,1,0},{0,0,1,0},{0,0,1,0}},
+    {{0,0,0,0},{1,1,1,1},{0,0,0,0},{0,0,0,0}},
+    {{0,0,1,0},{0,0,1,0},{0,0,1,0},{0,0,1,0}}
+  }
+};
+
+// Farby
+uint32_t colors[7] = { strip.Color(255,0,0), strip.Color(0,255,0), strip.Color(0,0,255),
+                        strip.Color(255,255,0), strip.Color(0,255,255), strip.Color(255,0,255),
+                        strip.Color(255,128,0) };
+
+byte field[MATRIX_HEIGHT*NUM_MATRICES][MATRIX_WIDTH];
+
+struct Piece { byte shape; int x,y; byte rotation; } currentPiece;
+
+void setup() {
+  strip.begin();
+  strip.show();
+  pinMode(PIN_LEFT, INPUT_PULLUP);
+  pinMode(PIN_RIGHT, INPUT_PULLUP);
+  pinMode(PIN_ROTATE, INPUT_PULLUP);
+  spawnPiece();
+}
+
+void loop() {
+  handleInput();
+  if(!movePiece(0,1)) { mergePiece(); clearLines(); spawnPiece(); if(checkGameOver()){ flashRed(); resetField(); } }
+  drawField();
+  delay(300);
+}
+
+void handleInput() {
+  if(digitalRead(PIN_LEFT)==LOW) movePiece(-1,0);
+  if(digitalRead(PIN_RIGHT)==LOW) movePiece(1,0);
+  if(digitalRead(PIN_ROTATE)==LOW) rotatePiece();
+}
+
+void spawnPiece() { currentPiece.shape=random(0,7); currentPiece.x=2; currentPiece.y=0; currentPiece.rotation=0; }
+
+bool movePiece(int dx,int dy) { currentPiece.x+=dx; currentPiece.y+=dy; if(collides()){ currentPiece.x-=dx; currentPiece.y-=dy; return false; } return true; }
+
+void rotatePiece() { currentPiece.rotation=(currentPiece.rotation+1)%4; if(collides()) currentPiece.rotation=(currentPiece.rotation+3)%4; }
+
+bool collides() {
+  for(int i=0;i<4;i++) for(int j=0;j<4;j++)
+    if(shapes[currentPiece.shape][currentPiece.rotation][i][j]){
+      int fx=currentPiece.x+j; int fy=currentPiece.y+i;
+      if(fx<0||fx>=MATRIX_WIDTH||fy>=MATRIX_HEIGHT*NUM_MATRICES) return true;
+      if(field[fy][fx]!=0) return true;
+    }
+  return false;
+}
+
+void mergePiece(){ for(int i=0;i<4;i++) for(int j=0;j<4;j++) if(shapes[currentPiece.shape][currentPiece.rotation][i][j]) field[currentPiece.y+i][currentPiece.x+j]=currentPiece.shape+1; }
+
+void clearLines(){
+  for(int y=MATRIX_HEIGHT*NUM_MATRICES-1;y>=0;y--){
+    bool full=true; for(int x=0;x<MATRIX_WIDTH;x++) if(field[y][x]==0) full=false;
+    if(full){ for(int yy=y;yy>0;yy--) for(int x=0;x<MATRIX_WIDTH;x++) field[yy][x]=field[yy-1][x]; for(int x=0;x<MATRIX_WIDTH;x++) field[0][x]=0; y++; }
+  }
+}
+
+bool checkGameOver(){ for(int x=0;x<MATRIX_WIDTH;x++) if(field[0][x]!=0) return true; return false; }
+
+void flashRed(){ for(int k=0;k<3;k++){ for(int i=0;i<NUM_PIXELS;i++) strip.setPixelColor(i,strip.Color(255,0,0)); strip.show(); delay(200); for(int i=0;i<NUM_PIXELS;i++) strip.setPixelColor(i,0); strip.show(); delay(200); } }
+
+void resetField(){ for(int y=0;y<MATRIX_HEIGHT*NUM_MATRICES;y++) for(int x=0;x<MATRIX_WIDTH;x++) field[y][x]=0; }
+
+void drawField(){
+  for(int y=0;y<MATRIX_HEIGHT*NUM_MATRICES;y++){
+    for(int x=0;x<MATRIX_WIDTH;x++){
+      int idx=xyToIndex(x,y);
+      if(field[y][x]==0) strip.setPixelColor(idx,0); else strip.setPixelColor(idx,colors[field[y][x]-1]);
+    }
+  }
+  for(int i=0;i<4;i++) for(int j=0;j<4;j++)
+    if(shapes[currentPiece.shape][currentPiece.rotation][i][j]){
+      int fx=currentPiece.x+j; int fy=currentPiece.y+i;
+      if(fx>=0&&fx<MATRIX_WIDTH&&fy>=0&&fy<MATRIX_HEIGHT*NUM_MATRICES)
+        strip.setPixelColor(xyToIndex(fx,fy),colors[currentPiece.shape]);
+    }
+  strip.show();
+}
+
+// Mapovanie: horná matica normál, spodná matica odspodu nahor + zrkadlo horizontálne
+int xyToIndex(int x,int y){
+  if(y<MATRIX_HEIGHT) return y*MATRIX_WIDTH + x; // horná
+  else {
+    int row = MATRIX_HEIGHT-1-(y-MATRIX_HEIGHT); // odspodu nahor
+    int col = MATRIX_WIDTH-1-x; // zrkadlo horizontálne
+    return MATRIX_WIDTH*MATRIX_HEIGHT + row*MATRIX_WIDTH + col;
+  }
+}
